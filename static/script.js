@@ -12,22 +12,56 @@ var tooltip = d3.select("div.tooltip");
 var tooltip_title = d3.select("#title");
 var tooltip_price = d3.select("#price");
 
+// uncheck radios:
+var allRadios = document.getElementsByName('overlay');
+var booRadio;
+var x = 0;
+for(x = 0; x < allRadios.length; x++){
+
+    allRadios[x].onclick = function() {
+        if(booRadio == this){
+            this.checked = false;
+            booRadio = null;
+        }else{
+            booRadio = this;
+        }
+    };
+}
+
+
+$(document).click(function(){
+	var overlay = $("input[name='overlay']:checked").val();
+
+	if ((overlay == "interpolation") || (overlay == "heatmap")){
+		$(".grid").addClass("visible");
+	}
+	else{$(".grid").removeClass("visible");}
+
+	if (overlay == "heatmap"){
+		$(".spread").addClass("visible");
+	}
+	else{$(".spread").removeClass("visible");}
+
+
+
+});
+
 
 var map = L.map('map').setView([22.539029, 114.062076], 16);
 
 //this is the OpenStreetMap tile implementation
 
-L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png', {
-	attribution: '&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
-}).addTo(map);
+// L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png', {
+// 	attribution: '&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
+// }).addTo(map);
 
 //uncomment for Mapbox implementation, and supply your own access token
 
-// L.tileLayer('https://api.tiles.mapbox.com/v4/{mapid}/{z}/{x}/{y}.png?access_token={accessToken}', {
-// 	attribution: 'Map data &copy; <a href="http://openstreetmap.org">OpenStreetMap</a>, Imagery © <a href="http://mapbox.com">Mapbox</a>',
-// 	mapid: 'mapbox.light',
-// 	accessToken: [INSERT YOUR TOKEN HERE!]
-// }).addTo(map);
+		L.tileLayer('https://api.tiles.mapbox.com/v4/{mapid}/{z}/{x}/{y}.png?access_token={accessToken}', {
+			attribution: 'Map data &copy; <a href="http://openstreetmap.org">OpenStreetMap</a>, Imagery © <a href="http://mapbox.com">Mapbox</a>',
+			mapid: 'mapbox.light',
+			accessToken: 'pk.eyJ1Ijoic2t5bGFyYnIiLCJhIjoiY2lmaW84czRuYm5ybXJ5bHh5YnM5a3lzdiJ9.EFoA13UUx70WH41vhjRyuw'
+		}).addTo(map);
 
 //create variables to store a reference to svg and g elements
 
@@ -60,49 +94,33 @@ function updateData(){
 	var lng2 = mapBounds["_northEast"]["lng"];
 
 	// CAPTURE USER INPUT FOR CELL SIZE FROM HTML ELEMENTS
-	var cell_size = 25;
+	var cell_size = $("input[name='grid']:checked").val();
 	var w = window.innerWidth;
 	var h = window.innerHeight;
 
 	// CAPTURE USER INPUT FOR ANALYSIS TYPE SELECTION
-	var checked = document.getElementById("interpolation").checked
+	var overlay = $("input[name='overlay']:checked").val();
 
 	// CAPTURE USER INPUT FOR HEAT MAP 'SPREAD' OR OTHER PARAMETERS
+	var spread = $("input[name='spread']:checked").val();
+	var results = $("input[name='results']:checked").val();
+
 
 	// SEND USER CHOICES FOR ANALYSIS TYPE, CELL SIZE, HEAT MAP SPREAD, ETC. TO SERVER
-	request = "/getData?lat1=" + lat1 + "&lat2=" + lat2 + "&lng1=" + lng1 + "&lng2=" + lng2 + "&w=" + w + "&h=" + h + "&cell_size=" + cell_size + "&analysis=" + checked
+	request = "/getData?lat1=" + lat1 + "&lat2=" + lat2 + "&lng1=" + lng1 + "&lng2=" + lng2 + "&w=" + w + "&h=" + h + "&cell_size=" + cell_size + "&analysis=" + overlay + "&spread=" + spread + "&results=" + results
 
 	console.log(request);
 
   	d3.json(request, function(data) {
 
 		//create placeholder circle geometry and bind it to data
-		var circles = g.selectAll("circle").data(data.features);
-
-		console.log(data);
-
-		circles.enter()
-			.append("circle")
-			.on("mouseover", function(d){
-				tooltip.style("visibility", "visible");
-				tooltip_title.text(d.properties.name);
-				tooltip_price.text("Price: " + d.properties.price);
-			})
-			.on("mousemove", function(){
-				tooltip.style("top", (d3.event.pageY-10)+"px")
-				tooltip.style("left",(d3.event.pageX+10)+"px");
-			})
-			.on("mouseout", function(){
-				tooltip.style("visibility", "hidden");
-			})
-			// .attr("fill", function(d) { return "hsl(" + Math.floor((1-d.properties.priceNorm)*250) + ", 100%, 50%)"; })
-		;
 
 		// call function to update geometry
 		update();
 		map.on("viewreset", update);
 
-		if (checked == true){
+		if ((overlay == "interpolation") || (overlay == "heatmap")){
+
 
 			var topleft = projectPoint(lat2, lng1);
 
@@ -127,6 +145,8 @@ function updateData(){
 		// function to update the data
 		function update() {
 
+			// g.selectAll("circle").remove();
+
 			g_overlay.selectAll("rect").remove()
 
 			// get bounding box of data
@@ -145,10 +165,37 @@ function updateData(){
 		    g   .attr("transform", "translate(" + (-topLeft[0] + buffer) + "," + (-topLeft[1] + buffer) + ")");
 
 		    // update circle position and size
+
+
+			var circles = g.selectAll("circle").data(data.features);
+
+			circles.exit().remove();
+			console.log(data);
+
+			circles.enter()
+				.append("circle")
+				.on("mouseover", function(d){
+					tooltip.style("visibility", "visible");
+					tooltip_title.text(d.properties.name);
+					tooltip_price.text("Price: " + d.properties.price);
+				})
+				.on("mousemove", function(){
+					tooltip.style("top", (d3.event.pageY-10)+"px")
+					tooltip.style("left",(d3.event.pageX+10)+"px");
+				})
+				.on("mouseout", function(){
+					tooltip.style("visibility", "hidden");
+				})
+
+				// .attr("fill", function(d) { return "hsl(" + Math.floor((1-d.properties.priceNorm)*250) + ", 100%, 50%)"; })
+			;
+
+
 		    circles
 		    	.attr("cx", function(d) { return projectPoint(d.geometry.coordinates[0], d.geometry.coordinates[1]).x; })
 		    	.attr("cy", function(d) { return projectPoint(d.geometry.coordinates[0], d.geometry.coordinates[1]).y; })
-    			.attr("r", function(d) { return Math.pow(d.properties.price,.3); });
+    			.attr("r", function(d) { return Math.pow(d.properties.price,.3); })
+				.exit();
 		};
 	});
 

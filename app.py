@@ -77,11 +77,13 @@ def getData():
 	analysis = request.args.get('analysis')
 
 	#CAPTURE ANY ADDITIONAL ARGUMENTS SENT FROM THE CLIENT HERE
+	spread = int(request.args.get('spread'))
+	results = int(request.args.get('results'))
 
 	print "received coordinates: [" + lat1 + ", " + lat2 + "], [" + lng1 + ", " + lng2 + "]"
 	
 	client = pyorient.OrientDB("localhost", 2424)
-	session_id = client.connect("root", "password")
+	session_id = client.connect("root", "admin")
 	db_name = "soufun"
 	db_username = "admin"
 	db_password = "admin"
@@ -100,8 +102,9 @@ def getData():
 	#USE INFORMATION RECEIVED FROM CLIENT TO CONTROL 
 	#HOW MANY RECORDS ARE CONSIDERED IN THE ANALYSIS
 	
-	# random.shuffle(records)
-	# records = records[:100]
+	if results != 0:
+		random.shuffle(records)
+		records = records[:results]
 
 	numListings = len(records)
 	print 'received ' + str(numListings) + ' records'
@@ -135,7 +138,7 @@ def getData():
 
 		output["features"].append(feature)
 
-	if analysis == "false":
+	if analysis != "interpolation" and analysis != "heatmap":
 		q.put('idle')
 		return json.dumps(output)
 
@@ -157,86 +160,86 @@ def getData():
 	#BETWEEN HEAT MAP AND INTERPOLATION ANALYSIS
 
 	## HEAT MAP IMPLEMENTATION
-	# for record in records:
+	if analysis == "heatmap":
+		for record in records:
 
-	# 	pos_x = int(remap(record.longitude, lng1, lng2, 0, numW))
-	# 	pos_y = int(remap(record.latitude, lat1, lat2, numH, 0))
+			pos_x = int(remap(record.longitude, lng1, lng2, 0, numW))
+			pos_y = int(remap(record.latitude, lat1, lat2, numH, 0))
 
-	#USE INFORMATION RECEIVED FROM CLIENT TO CONTROL SPREAD OF HEAT MAP
-	# 	spread = 12
+		# USE INFORMATION RECEIVED FROM CLIENT TO CONTROL SPREAD OF HEAT MAP
 
-	# 	for j in range(max(0, (pos_y-spread)), min(numH, (pos_y+spread))):
-	# 		for i in range(max(0, (pos_x-spread)), min(numW, (pos_x+spread))):
-	# 			grid[j][i] += 2 * math.exp((-point_distance(i,j,pos_x,pos_y)**2)/(2*(spread/2)**2))
+			for j in range(max(0, (pos_y-spread)), min(numH, (pos_y+spread))):
+				for i in range(max(0, (pos_x-spread)), min(numW, (pos_x+spread))):
+					grid[j][i] += 2 * math.exp((-point_distance(i,j,pos_x,pos_y)**2)/(2*(spread/2)**2))
 
-
+		q.put('idle')
 	## MACHINE LEARNING IMPLEMENTATION
+	if analysis == "interpolation":
+		featureData = []
+		targetData = []
 
-	featureData = []
-	targetData = []
+		for record in records:
+			featureData.append([record.latitude, record.longitude])
+			targetData.append(record.price)
 
-	for record in records:
-		featureData.append([record.latitude, record.longitude])
-		targetData.append(record.price)
+		X = np.asarray(featureData, dtype='float')
+		y = np.asarray(targetData, dtype='float')
 
-	X = np.asarray(featureData, dtype='float')
-	y = np.asarray(targetData, dtype='float')
+		breakpoint = int(numListings * .7)
 
-	breakpoint = int(numListings * .7)
+		print "length of dataset: " + str(numListings)
+		print "length of training set: " + str(breakpoint)
+		print "length of validation set: " + str(numListings-breakpoint)
 
-	print "length of dataset: " + str(numListings)
-	print "length of training set: " + str(breakpoint)
-	print "length of validation set: " + str(numListings-breakpoint)
+		# create training and validation set
+		X_train = X[:breakpoint]
+		X_val = X[breakpoint:]
 
-	# create training and validation set
-	X_train = X[:breakpoint]
-	X_val = X[breakpoint:]
+		y_train = y[:breakpoint]
+		y_val = y[breakpoint:]
 
-	y_train = y[:breakpoint]
-	y_val = y[breakpoint:]
+		#mean 0, variance 1
+		scaler = preprocessing.StandardScaler().fit(X_train)
+		X_train_scaled = scaler.transform(X_train)
 
-	#mean 0, variance 1
-	scaler = preprocessing.StandardScaler().fit(X_train)
-	X_train_scaled = scaler.transform(X_train)
+		mse_min = 10000000000000000000000
 
-	mse_min = 10000000000000000000000
+		for C in [.01, 1, 100, 10000, 1000000]:
 
-	for C in [.01, 1, 100, 10000, 1000000]:
+			for e in [.01, 1, 100, 10000, 1000000]:
 
-		for e in [.01, 1, 100, 10000, 1000000]:
+					for g in [.01, 1, 100, 10000, 1000000]:
 
-				for g in [.01, 1, 100, 10000, 1000000]:
+						q.put("training model: C[" + str(C) + "], e[" + str(e) + "], g[" + str(g) + "]")
 
-					q.put("training model: C[" + str(C) + "], e[" + str(e) + "], g[" + str(g) + "]")
+						model = svm.SVR(C=C, epsilon=e, gamma=g, kernel='rbf', cache_size=2000)
+						model.fit(X_train_scaled, y_train)
 
-					model = svm.SVR(C=C, epsilon=e, gamma=g, kernel='rbf', cache_size=2000)
-					model.fit(X_train_scaled, y_train)
+						y_val_p = [model.predict(i) for i in X_val]
 
-					y_val_p = [model.predict(i) for i in X_val]
+						mse = 0
+						for i in range(len(y_val_p)):
+							mse += (y_val_p[i] - y_val[i]) ** 2
+						mse /= len(y_val_p)
 
-					mse = 0
-					for i in range(len(y_val_p)):
-						mse += (y_val_p[i] - y_val[i]) ** 2
-					mse /= len(y_val_p)
+						if mse < mse_min:
+							mse_min = mse
+							model_best = model
+							C_best = C
+							e_best = e
+							g_best = g
 
-					if mse < mse_min:
-						mse_min = mse
-						model_best = model
-						C_best = C
-						e_best = e
-						g_best = g
+		q.put("best model: C[" + str(C_best) + "], e[" + str(e_best) + "], g[" + str(g_best) + "]")
 
-	q.put("best model: C[" + str(C_best) + "], e[" + str(e_best) + "], g[" + str(g_best) + "]")
+		for j in range(numH):
+			for i in range(numW):
+				lat = remap(j, numH, 0, lat1, lat2)
+				lng = remap(i, 0, numW, lng1, lng2)
 
-	for j in range(numH):
-		for i in range(numW):
-			lat = remap(j, numH, 0, lat1, lat2)
-			lng = remap(i, 0, numW, lng1, lng2)
-
-			testData = [[lat, lng]]
-			X_test = np.asarray(testData, dtype='float')
-			X_test_scaled = scaler.transform(X_test)
-			grid[j][i] = model_best.predict(X_test_scaled)
+				testData = [[lat, lng]]
+				X_test = np.asarray(testData, dtype='float')
+				X_test_scaled = scaler.transform(X_test)
+				grid[j][i] = model_best.predict(X_test_scaled)
 
 
 
@@ -257,7 +260,6 @@ def getData():
 
 			output["analysis"].append(newItem)
 
-	# q.put('idle')
 
 	return json.dumps(output)
 
