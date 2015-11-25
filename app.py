@@ -75,10 +75,9 @@ def getData():
 	cell_size = float(request.args.get('cell_size'))
 
 	analysis = request.args.get('analysis')
+	analysisType = request.args.get('analysisType')
 
 	#CAPTURE ANY ADDITIONAL ARGUMENTS SENT FROM THE CLIENT HERE
-	spread = int(request.args.get('spread'))
-	results = int(request.args.get('results'))
 
 	print "received coordinates: [" + lat1 + ", " + lat2 + "], [" + lng1 + ", " + lng2 + "]"
 	
@@ -98,13 +97,6 @@ def getData():
 	query = 'SELECT FROM Listing WHERE latitude BETWEEN {} AND {} AND longitude BETWEEN {} AND {} AND prec = 1 AND conf > 60'
 
 	records = client.command(query.format(lat1, lat2, lng1, lng2))
-
-	#USE INFORMATION RECEIVED FROM CLIENT TO CONTROL 
-	#HOW MANY RECORDS ARE CONSIDERED IN THE ANALYSIS
-	
-	if results != 0:
-		random.shuffle(records)
-		records = records[:results]
 
 	numListings = len(records)
 	print 'received ' + str(numListings) + ' records'
@@ -138,7 +130,7 @@ def getData():
 
 		output["features"].append(feature)
 
-	if analysis != "interpolation" and analysis != "heatmap":
+	if analysis == "false":
 		q.put('idle')
 		return json.dumps(output)
 
@@ -156,25 +148,23 @@ def getData():
 		for i in range(numW):
 			grid[j].append(0)
 
-	#USE CONDITIONAL ALONG WITH UI INFORMATION RECEIVED FROM THE CLIENT TO SWITCH
-	#BETWEEN HEAT MAP AND INTERPOLATION ANALYSIS
-
-	## HEAT MAP IMPLEMENTATION
-	if analysis == "heatmap":
+	if analysisType == "heatmap":
+		## HEAT MAP IMPLEMENTATION
 		for record in records:
 
 			pos_x = int(remap(record.longitude, lng1, lng2, 0, numW))
 			pos_y = int(remap(record.latitude, lat1, lat2, numH, 0))
 
-		# USE INFORMATION RECEIVED FROM CLIENT TO CONTROL SPREAD OF HEAT MAP
+			spread = 12
 
 			for j in range(max(0, (pos_y-spread)), min(numH, (pos_y+spread))):
 				for i in range(max(0, (pos_x-spread)), min(numW, (pos_x+spread))):
 					grid[j][i] += 2 * math.exp((-point_distance(i,j,pos_x,pos_y)**2)/(2*(spread/2)**2))
 
 		q.put('idle')
-	## MACHINE LEARNING IMPLEMENTATION
-	if analysis == "interpolation":
+
+	else:
+		## MACHINE LEARNING IMPLEMENTATION
 		featureData = []
 		targetData = []
 
@@ -204,11 +194,12 @@ def getData():
 
 		mse_min = 10000000000000000000000
 
-		for C in [.01, 1, 100, 10000, 1000000]:
+		# add values to arrays in nested loops to test other models
+		for C in [10000]:
 
-			for e in [.01, 1, 100, 10000, 1000000]:
+			for e in [10000]:
 
-					for g in [.01, 1, 100, 10000, 1000000]:
+					for g in [0.0]:
 
 						q.put("training model: C[" + str(C) + "], e[" + str(e) + "], g[" + str(g) + "]")
 
@@ -259,7 +250,6 @@ def getData():
 			newItem['value'] = grid[j][i]
 
 			output["analysis"].append(newItem)
-
 
 	return json.dumps(output)
 
